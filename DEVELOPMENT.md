@@ -491,13 +491,17 @@ def understand(text: str, threshold: Optional[float] = None,
 
 def main() -> None:
     """Read sentences until exit, EOF, or Ctrl+C."""
-    print('Simple NLU\nType "exit" to quit.\n')
+    # Import here to keep understand() usable independently of the dialogue layer.
+    from src.dialogue import DialogueManager
+
+    bot = DialogueManager()
+    print('Simple NLU\nType "exit" to quit, or "reset" to clear the conversation.\n')
     while True:
         try:
             text = input("You: ")
             if text.strip().lower() == "exit":
                 break
-            result = understand(text)
+            result = bot.respond(text)
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -507,6 +511,7 @@ def main() -> None:
         except ValueError as error:
             print(error)
             continue
+        print(f"Bot: {result['reply']}\n")
         print(f"Intent: {result['intent']}")
         print(f"Confidence: {result['confidence']:.0%}\n")
         print("Entities:")
@@ -547,12 +552,13 @@ Full contents:
 
 ```python
 """Local FastAPI endpoints for the NLU pipeline."""
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from src.nlu import understand
+from src.dialogue import ConversationState, DialogueManager
 
 app = FastAPI(title="Simple NLU API")
 
@@ -581,6 +587,46 @@ def understand_sentence(request: UnderstandRequest) -> Dict[str, Any]:
     except FileNotFoundError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return {key: result[key] for key in ("intent", "confidence", "entities")}
+
+
+# The client carries state between turns, so conversations do not share memory.
+
+
+class ChatState(BaseModel):
+    """A booking draft supplied by the client, never a saved reservation."""
+    active: bool = False
+    date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    time: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    party_size: Optional[int] = Field(default=None, gt=0)
+    awaiting_confirmation: bool = False
+
+    @field_validator("date")
+    @classmethod
+    def valid_date(cls, value):
+        if value is not None:
+            from datetime import date
+            date.fromisoformat(value)
+        return value
+
+
+class ChatRequest(UnderstandRequest):
+    """Send the previous response's state to continue the same conversation."""
+    state: ChatState = Field(default_factory=ChatState)
+
+
+@app.post("/chat")
+def chat(request: ChatRequest) -> Dict[str, Any]:
+    state = ConversationState(**request.state.model_dump())
+    if state.awaiting_confirmation and (
+        not state.active or state.missing_slot() is not None
+    ):
+        raise HTTPException(status_code=422, detail="Confirmation requires an active, complete draft.")
+    if not state.active:
+        state = ConversationState()
+    try:
+        return DialogueManager(state).respond(request.text)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 ```
 
 Run:
@@ -821,3 +867,347 @@ Expected output: Packages install in the active virtual environment, or report R
 ## Stage 11: README
 
 README.md explains NLU, TF-IDF, Logistic Regression, the architecture, all files, exact macOS and VS Code setup, usage, and limitations. Open it in VS Code and press Cmd+Shift+V for Markdown Preview. Expected output: formatted project documentation.
+
+## Stage 12: Replies and conversation memory
+
+`src/dialogue.py` keeps one draft per conversation and combines learned intents with reply templates and contextual slot-filling rules. It asks for missing information and requests confirmation. Menu, hours, and address come from editable local JSON. No real reservation is saved. The CLI now uses this manager; POST `/chat` accepts client-carried state. README contains examples and state handling instructions.
+
+Run `python -m src.nlu`, enter `Book a table tomorrow`, then `7pm`, `four`, and `yes`. Expect time and party-size questions, a summary, then an explicitly labelled demo confirmation. Run `pytest` for the full test suite.
+
+### `src/dialogue.py`
+
+Full contents:
+
+```python
+"""Small dialogue manager: learned intents, remembered slots, and local replies."""
+import json
+import re
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from src.entities import NUMBER_WORDS
+from src.nlu import understand
+
+INFO_PATH = Path(__file__).resolve().parents[1] / "data" / "restaurant_info.json"
+QUESTIONS = {
+    "date": "What date would you like? For example, tomorrow or next Friday.",
+    "time": "What time would you like? For example, 7pm or 19:30.",
+    "party_size": "How many people? You can say four or for 4 people.",
+}
+
+
+@dataclass
+class ConversationState:
+    """Only the current booking draft is remembered; no real reservation exists."""
+    active: bool = False
+    date: Optional[str] = None
+    time: Optional[str] = None
+    party_size: Optional[int] = None
+    awaiting_confirmation: bool = False
+
+    def missing_slot(self) -> Optional[str]:
+        return next((name for name in QUESTIONS if getattr(self, name) is None), None)
+
+
+def load_restaurant_info() -> Dict[str, Any]:
+    """Read editable local information without inventing restaurant facts."""
+    with INFO_PATH.open() as handle:
+        return json.load(handle)
+
+
+class DialogueManager:
+    """Keep one conversation's state; independent instances never share memory."""
+
+    def __init__(self, state: Optional[ConversationState] = None,
+                 restaurant_info: Optional[Dict[str, Any]] = None):
+        self.state = ConversationState(**asdict(state)) if state else ConversationState()
+        self.restaurant_info = load_restaurant_info() if restaurant_info is None else restaurant_info
+
+    def respond(self, text: str, reference_time: Optional[datetime] = None) -> Dict[str, Any]:
+        """Analyze a turn and return a reply, updated state, and original NLU output.
+
+        Control phrases (yes/no/reset) and bare counts are dialogue rules, not
+        replacements for the trained classifier. Raw NLU confidence is preserved.
+        """
+        result = understand(text, reference_time=reference_time)
+        normalized = re.sub(r"[.!?]+$", "", text.strip().lower()).strip()
+        handled_as = "intent"
+
+        if normalized in {"reset", "start over", "cancel", "never mind", "nevermind"}:
+            self.state = ConversationState()
+            reply = "Okay, I cleared the conversation draft. How can I help?"
+            handled_as = "control"
+        elif self.state.awaiting_confirmation and normalized in {"yes", "y", "confirm", "yes please", "okay", "ok"}:
+            draft = self._slots()
+            self.state = ConversationState()
+            reply = (f"Demo booking draft confirmed: {draft['party_size']} people on "
+                     f"{draft['date']} at {draft['time']}. No real reservation has been saved; "
+                     "please contact the restaurant to book.")
+            return {**result, "reply": reply, "handled_as": "confirmation",
+                    "state": asdict(self.state), "booking_draft": draft}
+        elif self.state.awaiting_confirmation and normalized in {"no", "n", "no thanks"}:
+            self.state = ConversationState()
+            reply = "Okay, I discarded the draft. You can start a new booking anytime."
+            handled_as = "confirmation"
+        elif result["intent"] in {"opening_hours", "view_menu", "restaurant_location", "greeting"}:
+            reply = self._information_reply(result["intent"])
+            if self.state.active:
+                reply += " " + self._booking_prompt()
+        elif result["intent"] == "goodbye":
+            self.state = ConversationState()
+            reply = "Goodbye! Thanks for chatting."
+        elif result["intent"] == "cancel_booking":
+            was_active = self.state.active
+            self.state = ConversationState()
+            reply = ("I cleared your current draft. " if was_active else "") + (
+                "I can't cancel an existing reservation here. Please contact the restaurant to cancel it."
+            )
+        elif result["intent"] == "modify_booking" and not self.state.active:
+            reply = ("I can't change a saved reservation here. Please contact the restaurant. "
+                     "If you'd like to prepare a new draft, say 'book a table'.")
+        elif result["intent"] == "restaurant_booking" or self.state.active:
+            if not self.state.active:
+                self.state = ConversationState(active=True)
+            entities = dict(result["entities"])
+            # A standalone number answers only a pending party-size question.
+            if self.state.missing_slot() == "party_size":
+                count = self._bare_count(normalized)
+                if count is not None:
+                    entities["party_size"] = count
+            if entities:
+                for key, value in entities.items():
+                    setattr(self.state, key, value)
+                self.state.awaiting_confirmation = False
+                reply = self._booking_prompt()
+                handled_as = "booking_details"
+            elif result["intent"] in {"restaurant_booking", "modify_booking"}:
+                reply = self._booking_prompt()
+            else:
+                reply = "I didn't understand that booking detail. " + self._booking_prompt()
+                handled_as = "clarification"
+        else:
+            reply = ("I'm not sure what you mean. I can help prepare a table-booking draft "
+                     "or answer questions about the menu, hours, and location. Could you rephrase?")
+            handled_as = "clarification"
+        return {**result, "reply": reply, "handled_as": handled_as, "state": asdict(self.state)}
+
+    @staticmethod
+    def _bare_count(text: str) -> Optional[int]:
+        match = re.fullmatch(r"(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")(?:\s+(?:people|guests))?", text)
+        if not match:
+            return None
+        raw = match.group(1)
+        count = int(raw) if raw.isdigit() else NUMBER_WORDS[raw]
+        return count if count > 0 else None
+
+    def _slots(self) -> Dict[str, Any]:
+        return {key: getattr(self.state, key) for key in QUESTIONS}
+
+    def _booking_prompt(self) -> str:
+        missing = self.state.missing_slot()
+        if missing:
+            return QUESTIONS[missing]
+        self.state.awaiting_confirmation = True
+        return (f"A table for {self.state.party_size} on {self.state.date} at {self.state.time}. "
+                "Confirm this demo draft? Say yes or no, or give corrected details. "
+                "This does not reserve a real table.")
+
+    def _information_reply(self, intent: str) -> str:
+        info = self.restaurant_info
+        if intent == "greeting":
+            return "Hello! I can help with a table-booking draft, menu, opening hours, or location."
+        if intent == "opening_hours":
+            hours = info.get("opening_hours")
+            return f"Our opening hours: {hours}" if hours else "Opening hours haven't been configured yet."
+        if intent == "restaurant_location":
+            address = info.get("address")
+            return f"You can find us at {address}." if address else "The restaurant address hasn't been configured yet."
+        menu = info.get("menu")
+        return "On the menu: " + "; ".join(menu) + "." if menu else "The menu hasn't been configured yet."
+```
+
+### `data/restaurant_info.json`
+
+Full contents:
+
+```json
+{
+  "name": "Your restaurant",
+  "opening_hours": null,
+  "address": null,
+  "menu": []
+}
+```
+
+### `tests/test_dialogue.py`
+
+Full contents:
+
+```python
+"""Conversation checks for memory, corrections, truthful replies, and isolation."""
+from datetime import datetime
+import subprocess
+import sys
+
+from fastapi.testclient import TestClient
+import pytest
+
+from api.main import app
+from src.dialogue import DialogueManager
+from src.train import PROJECT_ROOT
+
+BASE = datetime(2026, 10, 2, 12)
+
+
+def turn(bot, text):
+    return bot.respond(text, reference_time=BASE)
+
+
+def test_booking_across_turns():
+    bot = DialogueManager()
+    first = turn(bot, "Book a table tomorrow")
+    assert first["state"]["date"] == "2026-10-03"
+    assert "What time" in first["reply"]
+    second = turn(bot, "7pm")
+    assert second["state"]["time"] == "19:00"
+    assert "How many" in second["reply"]
+    third = turn(bot, "Four")
+    assert third["state"]["party_size"] == 4
+    assert third["state"]["awaiting_confirmation"]
+    last = turn(bot, "yes")
+    assert last["booking_draft"] == {"date": "2026-10-03", "time": "19:00", "party_size": 4}
+    assert "No real reservation has been saved" in last["reply"]
+    assert not last["state"]["active"]
+
+
+def test_out_of_order_details():
+    bot = DialogueManager()
+    assert "What date" in turn(bot, "I'd like to make a reservation")["reply"]
+    result = turn(bot, "party of 6")
+    assert result["state"]["party_size"] == 6
+    assert "What date" in result["reply"]
+    result = turn(bot, "tomorrow at 7:30 pm")
+    assert result["state"]["awaiting_confirmation"]
+    assert result["state"]["time"] == "19:30"
+
+
+def test_correction():
+    bot = DialogueManager()
+    turn(bot, "Book a table tomorrow at 7pm for 4 people")
+    changed = turn(bot, "8pm")
+    assert changed["state"]["time"] == "20:00"
+    assert changed["state"]["date"] == "2026-10-03"
+    assert turn(bot, "yes")["booking_draft"]["time"] == "20:00"
+
+
+@pytest.mark.parametrize("text", ["reset", "cancel", "never mind", "no"])
+def test_discard(text):
+    bot = DialogueManager()
+    turn(bot, "Book a table tomorrow at 7pm for 4 people")
+    result = turn(bot, text)
+    assert not result["state"]["active"]
+    assert result["state"]["date"] is None
+    assert "booking_draft" not in result
+
+
+def test_information_interrupt():
+    bot = DialogueManager(restaurant_info={"menu": ["Pasta", "Salad"]})
+    turn(bot, "Book a table tomorrow")
+    result = turn(bot, "Show me the menu")
+    assert "Pasta; Salad" in result["reply"]
+    assert "What time" in result["reply"]
+    assert result["state"]["date"] == "2026-10-03"
+    assert turn(bot, "7pm")["state"]["time"] == "19:00"
+
+
+def test_unknown_does_not_confirm():
+    bot = DialogueManager()
+    turn(bot, "Book a table tomorrow at 7pm for 4 people")
+    result = turn(bot, "My computer graphics card is broken")
+    assert result["handled_as"] == "clarification"
+    assert result["state"]["awaiting_confirmation"]
+    assert "booking_draft" not in result
+
+
+def test_number_only_when_asked():
+    bot = DialogueManager()
+    assert turn(bot, "four")["state"]["party_size"] is None
+    turn(bot, "Book a table tomorrow")
+    assert turn(bot, "four")["state"]["party_size"] is None
+    turn(bot, "7pm")
+    assert turn(bot, "0")["state"]["party_size"] is None
+    assert turn(bot, "4")["state"]["party_size"] == 4
+
+
+@pytest.mark.parametrize("text,info,expected", [
+    ("What time do you open?", {"opening_hours": "Daily 12:00–22:00"}, "Daily 12:00–22:00"),
+    ("Where are you located?", {"address": "123 Example Street"}, "123 Example Street"),
+    ("Show me the menu", {"menu": ["Soup", "Rice"]}, "Soup; Rice"),
+    ("Show me the menu", {}, "hasn't been configured"),
+    ("Where are you located?", {}, "hasn't been configured"),
+    ("What time do you open?", {}, "haven't been configured"),
+])
+def test_information(text, info, expected):
+    assert expected in turn(DialogueManager(restaurant_info=info), text)["reply"]
+
+
+def test_existing_reservation_replies():
+    bot = DialogueManager()
+    assert "can't cancel" in turn(bot, "Cancel my booking")["reply"]
+    assert "can't change" in turn(bot, "Change my reservation to tomorrow")["reply"]
+
+
+def test_goodbye_clears_memory():
+    bot = DialogueManager()
+    turn(bot, "Book a table tomorrow")
+    assert not turn(bot, "Bye")["state"]["active"]
+    assert turn(bot, "Book a table for two")["state"]["date"] is None
+
+
+def test_independent_managers():
+    first, second = DialogueManager(), DialogueManager()
+    turn(first, "Book a table tomorrow")
+    assert not turn(second, "Hello!")["state"]["active"]
+
+
+def test_chat_api():
+    with TestClient(app) as client:
+        response = client.post("/chat", json={"text": "Book a table tomorrow"})
+        assert response.status_code == 200
+        state = response.json()["state"]
+        state = client.post("/chat", json={"text": "7pm", "state": state}).json()["state"]
+        assert state["time"] == "19:00"
+        state = client.post("/chat", json={"text": "four", "state": state}).json()["state"]
+        assert state["awaiting_confirmation"]
+        confirmed = client.post("/chat", json={"text": "yes", "state": state}).json()
+        assert confirmed["booking_draft"]["party_size"] == 4
+        assert not confirmed["state"]["active"]
+        assert not client.post("/chat", json={"text": "hello"}).json()["state"]["active"]
+
+
+@pytest.mark.parametrize("payload", [
+    {"text": " "},
+    {"text": "yes", "state": {"awaiting_confirmation": True}},
+    {"text": "yes", "state": {"active": True, "awaiting_confirmation": True}},
+    {"text": "hello", "state": {"date": "2026-02-30"}},
+    {"text": "hello", "state": {"time": "25:00"}},
+    {"text": "hello", "state": {"party_size": 0}},
+])
+def test_invalid_chat(payload):
+    with TestClient(app) as client:
+        assert client.post("/chat", json=payload).status_code == 422
+
+
+def test_chat_cli():
+    process = subprocess.run(
+        [sys.executable, "-m", "src.nlu"],
+        input="Book a table tomorrow\n7pm\nfour\nyes\nexit\n", text=True,
+        capture_output=True, cwd=PROJECT_ROOT, timeout=30,
+    )
+    assert process.returncode == 0
+    assert "Bot: What time" in process.stdout
+    assert "Bot: How many people" in process.stdout
+    assert "Demo booking draft confirmed" in process.stdout
+```

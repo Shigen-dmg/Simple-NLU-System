@@ -1,6 +1,6 @@
 # Simple NLU
 
-A small local Natural Language Understanding project for learning Python and traditional machine learning. It runs on a MacBook in VS Code, with no LLM, paid AI API, external inference service, or downloaded pretrained language model. Package installation needs internet access; training and inference run locally.
+A small local Natural Language Understanding and dialogue project for learning Python and traditional machine learning. It runs on a MacBook in VS Code, with no LLM, paid AI API, external inference service, or downloaded pretrained language model. Package installation needs internet access; training and inference run locally.
 
 **NLU** turns a sentence into structured meaning. **Intent classification** identifies what someone wants to do (for example, book or cancel a table). **Entity extraction** finds details such as a date, time, or number of guests. This project recognizes eight restaurant intents and returns `unknown` when the highest class probability is below a configurable threshold.
 
@@ -76,22 +76,25 @@ language-nlu/
 ├── pytest.ini                Test discovery and import path
 ├── .gitignore                Python environments and caches
 ├── data/training_data.csv    Labeled intent examples
+├── data/restaurant_info.json Local menu, hours, and address for replies
 ├── models/intent_model.pkl   Trained TF-IDF/classifier pipeline (kept available)
 ├── src/
 │   ├── __init__.py            Marks the Python package
 │   ├── train.py               Data validation, training, evaluation, serialization
 │   ├── predict.py             Cached model loading and confidence rejection
 │   ├── entities.py            Independent date, time, and party-size extraction
-│   └── nlu.py                 Combined understand() function and interactive CLI
+│   ├── nlu.py                 Combined understand() function and interactive CLI
+│   └── dialogue.py            Replies and conversation memory
 ├── api/
 │   ├── __init__.py            Marks the API package
 │   └── main.py                FastAPI app and Pydantic input validation
 └── tests/
     ├── __init__.py            Marks the tests package
-    └── test_nlu.py            Intent, entity, dataset, CLI, and API checks
+    ├── test_nlu.py            Intent, entity, dataset, CLI, and API checks
+    └── test_dialogue.py       Conversation, corrections, reset, and chat API checks
 ```
 
-The complete implementation is in these files. [DEVELOPMENT.md](DEVELOPMENT.md) presents their full contents in build order, explains important code, and gives commands and expected output for each stage.
+The complete implementation is in these files. The dialogue layer uses the existing trained model; no retraining is needed just to enable replies. [DEVELOPMENT.md](DEVELOPMENT.md) presents their full contents in build order, explains important code, and gives commands and expected output for each stage.
 
 ## Stage 1: inspect the dataset
 
@@ -196,9 +199,11 @@ python -m src.nlu
 
 ```text
 Simple NLU
-Type "exit" to quit.
+Type "exit" to quit, or "reset" to clear the conversation.
 
 You: Book a table tomorrow at 7pm for 4 people
+Bot: A table for 4 on 2026-10-03 at 19:00. Confirm this demo draft? Say yes or no, or give corrected details. This does not reserve a real table.
+
 Intent: restaurant_booking
 Confidence: 89%
 
@@ -245,6 +250,97 @@ Tests cover all intents, an additional booking paraphrase, unrelated text, confi
 Add labeled sentences to the CSV, retrain, restart the CLI/API, and rerun tests. Preserve varied phrasing and balanced classes. Keep new evaluation examples distinct from training examples; the holdout here is small (six examples per intent) and its metrics are only a rough baseline.
 
 To replace TF-IDF with another classifier later, change training and the `predict_intent()` implementation while preserving its `{intent, confidence}` return contract. `understand()`, entity extraction, CLI, and API can keep using that interface. Transformer models would require different dependencies, training, and evaluation; none are included now.
+
+## Conversation replies and memory
+
+Run the same CLI command after restarting it:
+
+```bash
+python -m src.nlu
+```
+
+Try:
+
+```text
+You: Book a table tomorrow
+Bot: What time would you like? For example, 7pm or 19:30.
+You: 7pm
+Bot: How many people? You can say four or for 4 people.
+You: Four
+Bot: A table for 4 on 2026-10-03 at 19:00. Confirm this demo draft? ...
+You: yes
+Bot: Demo booking draft confirmed: 4 people on 2026-10-03 at 19:00. No real reservation has been saved; please contact the restaurant to book.
+```
+
+Dates follow the actual clock; the example assumes October 2, 2026. The CLI still displays raw intent, confidence, and entities below each reply, so you can see the NLU process. A short answer can have raw intent `unknown` while the dialogue manager correctly handles it as an answer to the pending question. It does not replace that confidence with an invented score.
+
+`src/dialogue.py` adds a **dialogue manager**: it remembers an active booking draft, asks for the first missing slot, and chooses response templates. The **state** consists of `active`, `date`, `time`, `party_size`, and `awaiting_confirmation`. Ordinary requests use the learned classifier. Exact dialogue controls such as yes/no/reset and number-only answers use small deterministic rules in their conversation context.
+
+- Supply details across turns or in one message. Supported entities may arrive in any order.
+- When asked for party size, use `four`, `4`, or `4 people`. Standalone counts are accepted only when party size is the next missing detail. For a correction after the summary, use `for six people`.
+- Correct a time with `8pm` or a date with `next Friday`; the bot shows an updated confirmation summary.
+- Ask `Show me the menu` during a booking. It replies and resumes its pending question.
+- Say `reset`, `start over`, `cancel`, or `never mind` to discard the current draft. Say `no` at confirmation to discard it.
+- Say `yes` at confirmation to acknowledge the demo draft. `booking_draft` is returned on that turn; the active state is cleared. No reservation is saved or availability checked.
+- Requests to cancel or modify an existing reservation explain that you must contact the restaurant. The bot can correct details of its current unsaved draft.
+- Unrecognized replies prompt clarification while retaining the current draft. Goodbye clears memory; `exit` quits the CLI.
+
+This is a small restaurant assistant with templates and one pending booking task. It does not generate unrestricted conversation or interpret arbitrary negations/corrections. Memory lasts only while the CLI process is running. It does not store customer data or confirmed drafts on disk.
+
+### Configure real restaurant replies
+
+Edit `data/restaurant_info.json` with your own information:
+
+```json
+{
+  "name": "Your restaurant",
+  "opening_hours": "Your actual opening hours",
+  "address": "Your actual restaurant address",
+  "menu": ["Your first dish", "Your second dish"]
+}
+```
+
+The shipped hours/address are `null` and the menu is empty. Missing values produce a clear “hasn't been configured” reply. `opening_hours` and `address` should be strings or null, and `menu` should be a list of strings. Save valid JSON and restart the CLI to load updates. The API loads the file for each chat request. Editing these facts needs no model retraining.
+
+### Python conversation interface
+
+```python
+from src.dialogue import DialogueManager
+
+bot = DialogueManager()
+print(bot.respond("Book a table tomorrow")["reply"])
+print(bot.respond("7pm")["reply"])
+print(bot.respond("four")["reply"])
+```
+
+Each manager owns independent state. `respond()` returns the original NLU fields plus `reply`, `handled_as`, and `state`; confirmation additionally returns `booking_draft`. `handled_as` tells you whether dialogue rules handled the message as booking details, confirmation, control, or clarification. `reference_time` remains available for deterministic examples/tests.
+
+### Chat API
+
+Start `uvicorn api.main:app --reload` and use `POST /chat` in Swagger at `http://127.0.0.1:8000/docs`. First request:
+
+```json
+{"text": "Book a table tomorrow"}
+```
+
+The response includes the bot's `reply` and `state`. Copy the **complete returned state** into your next request:
+
+```json
+{
+  "text": "7pm",
+  "state": {
+    "active": true,
+    "date": "2026-10-03",
+    "time": null,
+    "party_size": null,
+    "awaiting_confirmation": false
+  }
+}
+```
+
+Use the actual date from your response. Continue with `four`, then `yes`, always sending the latest returned state. Omitting state starts a fresh conversation. This client-carried design avoids a global shared session and keeps conversations independent; nothing persists on the server. State is a draft controlled by the client, never proof of a real booking. Malformed dates/times, nonpositive party sizes, and incomplete confirmation states return HTTP 422. `/understand` retains its existing request/response contract.
+
+Run `pytest` to check both NLU and conversation behavior. The verified suite has 66 passing tests, including the CLI's full booking conversation and independent API state.
 
 ## Reference documentation
 

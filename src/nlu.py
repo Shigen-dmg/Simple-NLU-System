@@ -16,13 +16,17 @@ def understand(text: str, threshold: Optional[float] = None,
 
 def main() -> None:
     """Read sentences until exit, EOF, or Ctrl+C."""
-    print('Simple NLU\nType "exit" to quit.\n')
+    # Import here to keep understand() usable independently of the dialogue layer.
+    from src.dialogue import DialogueManager
+
+    bot = DialogueManager()
+    print('Simple NLU\nType "exit" to quit, or "reset" to clear the conversation.\n')
     while True:
         try:
             text = input("You: ")
             if text.strip().lower() == "exit":
                 break
-            result = understand(text)
+            result = bot.respond(text)
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -32,6 +36,7 @@ def main() -> None:
         except ValueError as error:
             print(error)
             continue
+        print(f"Bot: {result['reply']}\n")
         print(f"Intent: {result['intent']}")
         print(f"Confidence: {result['confidence']:.0%}\n")
         print("Entities:")
