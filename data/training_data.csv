@@ -1,0 +1,194 @@
+text,intent
+Book a table for tomorrow,restaurant_booking
+Reserve dinner tonight,restaurant_booking
+Can I get a table for four,restaurant_booking
+I'd like to make a reservation,restaurant_booking
+Please book dinner for two people,restaurant_booking
+We need a table on Friday evening,restaurant_booking
+Could you reserve a table for me,restaurant_booking
+Book a table tomorrow at 7pm for 4 people,restaurant_booking
+Arrange a lunch reservation for six,restaurant_booking
+I'd like to reserve seating for our group,restaurant_booking
+Can we book dinner this weekend,restaurant_booking
+Is it possible to make a table booking,restaurant_booking
+Please reserve a spot for lunch,restaurant_booking
+Book dinner tomorrow at 8pm for 3 people,restaurant_booking
+I need a reservation for Saturday night,restaurant_booking
+We'd like a table for our anniversary,restaurant_booking
+Make a dinner booking for five guests,restaurant_booking
+Reserve a table near the window,restaurant_booking
+May I book a table at noon,restaurant_booking
+Can you arrange a reservation for tonight,restaurant_booking
+I want to book lunch next Monday,restaurant_booking
+Please get us a table for two,restaurant_booking
+I'd like to dine here tomorrow with friends,restaurant_booking
+Can you reserve a table for me?,restaurant_booking
+Cancel my reservation,cancel_booking
+I want to cancel my booking,cancel_booking
+Please cancel the table I reserved,cancel_booking
+We cannot attend so cancel our dinner reservation,cancel_booking
+I'd like to call off my lunch booking,cancel_booking
+Remove my reservation for Friday,cancel_booking
+Cancel the dinner reservation for two,cancel_booking
+I no longer need my booked table,cancel_booking
+Please delete my table booking,cancel_booking
+Could you cancel our reservation tonight,cancel_booking
+We need to cancel Saturday's booking,cancel_booking
+I want to withdraw my dinner reservation,cancel_booking
+Call off the table reservation please,cancel_booking
+Cancel my booking for tomorrow,cancel_booking
+Please revoke my lunch reservation,cancel_booking
+We won't be coming so cancel our table,cancel_booking
+Can you cancel the reservation under my name,cancel_booking
+I'd like my existing booking cancelled,cancel_booking
+Delete the dinner booking I made earlier,cancel_booking
+Our plans changed please cancel the reservation,cancel_booking
+I need to cancel the table for six,cancel_booking
+Cancel the booking at seven,cancel_booking
+Remove our dinner reservation from the schedule,cancel_booking
+Please cancel my reservation entirely,cancel_booking
+Change my reservation to tomorrow,modify_booking
+I want to modify my booking,modify_booking
+Move my table reservation to Friday,modify_booking
+Please change my booking time to 8pm,modify_booking
+Update our reservation to six people,modify_booking
+Can I reschedule my dinner booking,modify_booking
+Change the party size on my reservation,modify_booking
+Shift our lunch booking to next week,modify_booking
+I'd like to adjust my existing reservation,modify_booking
+Move our table booking an hour later,modify_booking
+Please amend the reservation under my name,modify_booking
+Change my table for two to a table for four,modify_booking
+Can you update my booking date,modify_booking
+Reschedule my reservation for Saturday evening,modify_booking
+Make my existing reservation earlier,modify_booking
+I'd like to add two guests to my booking,modify_booking
+Reduce the number of people on our reservation,modify_booking
+Can we move our reserved dinner to Sunday,modify_booking
+Modify my table booking to 7:30 pm,modify_booking
+Please change the reservation from lunch to dinner,modify_booking
+Update the time of my reservation,modify_booking
+Keep my booking but change the date,modify_booking
+Can I alter our dinner reservation,modify_booking
+I need to postpone my existing booking,modify_booking
+What time do you open,opening_hours
+When do you close,opening_hours
+What are your opening hours,opening_hours
+Are you open on Sundays,opening_hours
+Tell me your business hours,opening_hours
+How late is the restaurant open,opening_hours
+When does dinner service start,opening_hours
+What time do you shut tonight,opening_hours
+Are you open for lunch today,opening_hours
+What's your closing time on Friday,opening_hours
+When can customers start dining,opening_hours
+Do you open early on weekends,opening_hours
+Which hours are you open during the week,opening_hours
+Can you tell me when the restaurant opens,opening_hours
+Is the restaurant open on holidays,opening_hours
+When is your last seating,opening_hours
+What time does lunch service finish,opening_hours
+Are you still open at midnight,opening_hours
+What are your operating times,opening_hours
+Does the restaurant close in the afternoon,opening_hours
+How early do you open tomorrow,opening_hours
+Until what time can we eat here,opening_hours
+What is your Sunday opening schedule,opening_hours
+What time do you open?,opening_hours
+Show me the menu,view_menu
+What food do you serve,view_menu
+Can I see your dinner menu,view_menu
+I'd like to browse the dishes,view_menu
+Do you have vegetarian meals,view_menu
+What's on the lunch menu,view_menu
+Tell me about your desserts,view_menu
+Which dishes are available,view_menu
+Please send me your food menu,view_menu
+What are your specials today,view_menu
+Can I look at the drinks list,view_menu
+Do you serve seafood,view_menu
+What meals can I order,view_menu
+Show your vegan options please,view_menu
+I want to see the breakfast menu,view_menu
+What kind of cuisine do you offer,view_menu
+List your main courses,view_menu
+Are there gluten free options on the menu,view_menu
+Let me browse the restaurant menu,view_menu
+Do you offer a children's menu,view_menu
+Which appetizers do you serve,view_menu
+Can you show me your beverage menu,view_menu
+Tell me what dishes you cook,view_menu
+I'd like to check the menu before booking,view_menu
+Where is the restaurant,restaurant_location
+Where are you located,restaurant_location
+What is your address,restaurant_location
+How do I get to your restaurant,restaurant_location
+Can you give me directions,restaurant_location
+Which street are you on,restaurant_location
+Tell me your restaurant location,restaurant_location
+Where can I find you,restaurant_location
+Send me the address please,restaurant_location
+Are you near the train station,restaurant_location
+What's the nearest landmark to your restaurant,restaurant_location
+Show me where the restaurant is,restaurant_location
+I need directions to your building,restaurant_location
+Which neighborhood is the restaurant in,restaurant_location
+How can I reach your location,restaurant_location
+Where is your entrance,restaurant_location
+Can you share your street address,restaurant_location
+Is your restaurant downtown,restaurant_location
+What road is the restaurant on,restaurant_location
+Please help me find the restaurant,restaurant_location
+Where exactly are you situated,restaurant_location
+Give me the restaurant's postcode,restaurant_location
+Can you point me to your location,restaurant_location
+Where are you located?,restaurant_location
+Hello,greeting
+Hi there,greeting
+Hey,greeting
+Good morning,greeting
+Good evening,greeting
+Hello there,greeting
+Hi how are you,greeting
+Hey folks,greeting
+Greetings,greeting
+Good afternoon,greeting
+Hi everyone,greeting
+Hello restaurant team,greeting
+Nice to meet you,greeting
+Hey there how's it going,greeting
+Hi can you help me,greeting
+Hello good morning,greeting
+Howdy,greeting
+Hello again,greeting
+Hey good to see you,greeting
+Hi restaurant staff,greeting
+Greetings to your team,greeting
+Hi there folks,greeting
+Hello how are things,greeting
+Hey can we chat,greeting
+Bye,goodbye
+Goodbye,goodbye
+See you later,goodbye
+Have a nice day,goodbye
+That's all thanks bye,goodbye
+Good night,goodbye
+See you soon,goodbye
+Farewell,goodbye
+I'm leaving now goodbye,goodbye
+Thanks for your help see you,goodbye
+Talk to you later,goodbye
+Bye for now,goodbye
+Catch you later,goodbye
+Have a great evening,goodbye
+Until next time,goodbye
+Take care goodbye,goodbye
+All done thanks bye,goodbye
+See you next time,goodbye
+I have to go now,goodbye
+Thanks goodbye,goodbye
+Have a good night,goodbye
+Cheers see you around,goodbye
+Bye bye,goodbye
+That's everything goodbye,goodbye
+Today's Specials,view_menu
